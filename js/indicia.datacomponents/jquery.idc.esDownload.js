@@ -77,25 +77,50 @@
   }
 
   /**
+   * Retreive an object containing just settings relating to columns.
+   *
+   * @param element el
+   *   The plugin instance's element which holds the settings.
+   *
+   * @return obj
+   *   Object containing settings relating to columns to include.
+   */
+  function getColumnSettings(el) {
+    var data = {};
+    if (el.settings.columnsTemplate) {
+      data.columnsTemplate = el.settings.columnsTemplate;
+    }
+    if (el.settings.addColumns) {
+      data.addColumns = el.settings.addColumns;
+    }
+    if (el.settings.removeColumns) {
+      data.removeColumns = el.settings.removeColumns;
+    }
+    return data;
+  }
+
+  /**
    * Recurse until all the pages of a chunked download are received.
    *
-   * @param obj data
+   * @param obj lastResponse
    *   Response body from the ES proxy containing progress data.
    */
-  function doPages(el, data) {
+  function doPages(el, lastResponse) {
     var date;
     var hours;
     var minutes;
-    if (data.done < data.total) {
+    var data = {
+      scroll_id: lastResponse.scroll_id
+    };
+    if (lastResponse.done < lastResponse.total) {
+      $.extend(data, getColumnSettings(el));
       // Post to the ES proxy. Pass scroll_id parameter to request the next
       // chunk of the dataset.
       $.ajax({
         url: indiciaData.esProxyAjaxUrl + '/download/' + indiciaData.nid,
         type: 'POST',
         dataType: 'json',
-        data: {
-          scroll_id: data.scroll_id
-        },
+        data: data,
         success: function success(response) {
           updateProgress(el, response);
           doPages(el, response);
@@ -109,10 +134,10 @@
       minutes = '0' + date.getMinutes();
       minutes = minutes.substr(minutes.length - 2);
       $(el).find('.progress-circle-container').addClass('download-done');
-      $(el).find('.idc-download-files').append('<div><a href="' + data.filename + '">' +
+      $(el).find('.idc-download-files').append('<div><a href="' + lastResponse.filename + '">' +
         '<span class="fas fa-file-archive fa-2x"></span>' +
         'Download .zip file</a><br/>' +
-        'File containing ' + data.total + ' occurrences. Available until ' + hours + ':' + minutes + '</div>');
+        'File containing ' + lastResponse.total + ' occurrences. Available until ' + hours + ':' + minutes + '</div>');
       $(el).find('.idc-download-files').fadeIn('med');
     }
   }
@@ -137,15 +162,7 @@
         $(el).find('.circle').attr('style', 'stroke-dashoffset: 503px');
         $(el).find('.progress-text').text('Loading...');
         data = indiciaFns.getFormQueryData(source);
-        if (el.settings.columnsTemplate) {
-          data.columnsTemplate = el.settings.columnsTemplate;
-        }
-        if (el.settings.addColumns) {
-          data.addColumns = el.settings.addColumns;
-        }
-        if (el.settings.removeColumns) {
-          data.removeColumns = el.settings.removeColumns;
-        }
+        $.extend(data, getColumnSettings(el));
         // Post to the ES proxy.
         $.ajax({
           url: indiciaData.esProxyAjaxUrl + '/download/' + indiciaData.nid,

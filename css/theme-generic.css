@@ -271,6 +271,12 @@ ul.ui-menu li {
   .licence span.icon.licence-cc0 {
     background-position-y: -54px; }
 
+/* So we can absolute position the loading spinner */
+body {
+  position: relative; }
+  body > .loading-spinner {
+    position: fixed; }
+
 /* idcDataGrid plugin */
 .idc-output-dataGrid {
   position: relative;
@@ -282,7 +288,7 @@ ul.ui-menu li {
     right: 0;
     border: solid silver 1px;
     border-radius: 3px;
-    background-color: rgba(38, 80, 38, 0.1); }
+    background-color: rgba(225, 235, 225, 0.9); }
     .idc-output-dataGrid .data-grid-tools span {
       font-size: 20px;
       padding: 0;
@@ -358,9 +364,6 @@ table.es-data-grid {
     width: 100%;
     /* even columns width , fix width of table too*/
     table-layout: fixed; }
-  table.es-data-grid.fixed-header thead {
-    /* scrollbar is average 1em/16px width, remove it from thead width */
-    width: calc( 100% - 1em ); }
   table.es-data-grid.fixed-header .multiselect-cell {
     padding: 0;
     width: 12px; }

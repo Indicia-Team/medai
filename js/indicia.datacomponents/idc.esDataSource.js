@@ -111,7 +111,16 @@ var IdcEsDataSource;
     });
   };
 
-  IdcEsDataSource.prototype.doPopulation = function doPopulation(force) {
+  /**
+   * Fetch data and populate appropriate output plugins.
+   *
+   * @param bool force
+   *   Set to true to force even if request same as before.
+   * @param obj onlyForControl
+   *   jQuery plugin to populate into. If not supplied, all plugins linked to
+   *   source are populated.
+   */
+  IdcEsDataSource.prototype.doPopulation = function doPopulation(force, onlyForControl) {
     var source = this;
     var request = indiciaFns.getFormQueryData(source);
     var url;
@@ -138,11 +147,17 @@ var IdcEsDataSource;
             source.hideAllSpinners(source);
             alert('Elasticsearch query failed');
           } else {
+            // Convert hits.total to Elasticsearch 7 style.
+            if (response.hits.total && indiciaData.esVersion === 6) {
+              response.hits.total = { value: response.hits.total, relation: 'eq' };
+            }
             // Build any configured output tables.
             source.buildTableXY(response);
             $.each(indiciaData.outputPluginClasses, function eachPluginClass(i, pluginClass) {
               $.each(source.outputs[pluginClass], function eachOutput() {
-                $(this)[pluginClass]('populate', source.settings, response, request);
+                if (!onlyForControl || onlyForControl === this) {
+                  $(this)[pluginClass]('populate', source.settings, response, request);
+                }
               });
             });
             source.hideAllSpinners(source);
@@ -161,8 +176,14 @@ var IdcEsDataSource;
 
   /**
    * Request a datasource to repopulate from current parameters.
+   *
+   * @param bool force
+   *   Set to true to force even if request same as before.
+   * @param obj onlyForControl
+   *   jQuery plugin to populate into. If not supplied, all plugins linked to
+   *   source are populated.
    */
-  IdcEsDataSource.prototype.populate = function datasourcePopulate(force) {
+  IdcEsDataSource.prototype.populate = function datasourcePopulate(force, onlyForControl) {
     var source = this;
     var needsPopulation = false;
 
@@ -180,7 +201,7 @@ var IdcEsDataSource;
             var tabSelectFn = function eachTabSet() {
               if ($(tab).filter(':visible').length > 0) {
                 $(output).find('.loading-spinner').show();
-                source.doPopulation(force);
+                source.doPopulation(force, onlyForControl);
                 indiciaFns.unbindTabsActivate($(tab).closest('.ui-tabs'), tabSelectFn);
               }
             };
@@ -194,7 +215,7 @@ var IdcEsDataSource;
       });
     });
     if (needsPopulation) {
-      source.doPopulation(force);
+      source.doPopulation(force, onlyForControl);
     }
   };
 

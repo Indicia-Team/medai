@@ -61,18 +61,19 @@
   /**
    * Saves the comment associated with a verification or query event.
    */
-  function saveVerifyComment(occurrenceIds, status, comment) {
+  function saveVerifyComment(occurrenceIds, status, comment, email) {
     var commentToSave;
     var allTableMode = $(dataGrid).find('.multi-mode-table.active').length > 0;
     var data = {
       website_id: indiciaData.website_id,
       user_id: indiciaData.user_id
     };
-    var doc = {
+    var docUpdates = {
       identification: {}
     };
     var indiciaPostUrl;
     var requests = 0;
+    var currentDoc;
     // Since this might be slow.
     $('body').append('<div class="loading-spinner"><div>Loading...</div></div>');
     if (status.status) {
@@ -98,11 +99,27 @@
         $.extend(data, {
           'occurrence:ids': occurrenceIds.join(',')
         });
+        if (email && indiciaData.workflowEnabled) {
+          // This will only be the case when querying a single record. If the
+          // species requires fully logged comms, add the email body to the
+          // comment.
+          currentDoc = JSON.parse($(dataGrid).find('tr.selected').attr('data-doc-source'));
+          if (indiciaData.workflowTaxonMeaningIDsLogAllComms.indexOf(currentDoc.taxon.taxon_meaning_id) !== -1) {
+            data['occurrence_comment:correspondence_data'] = JSON.stringify({
+              email: [{
+                from: indiciaData.siteEmail,
+                to: email.to,
+                subject: email.subject,
+                body: email.body
+              }]
+            });
+          }
+        }
       }
-      doc.identification.verification_status = status.status[0];
+      docUpdates.identification.verification_status = status.status[0];
       if (status.status.length > 1) {
         data['occurrence:record_substatus'] = status.status[1];
-        doc.identification.verification_substatus = status.status[1];
+        docUpdates.identification.verification_substatus = status.status[1];
       }
       // Post update to Indicia.
       requests++;
@@ -115,10 +132,7 @@
             // Unset all table mode as this is a "dangerous" state that should be explicitly chosen each time.
             $(dataGrid).find('.multi-mode-table.active').removeClass('active');
             $(dataGrid).find('.multi-mode-selected').addClass('active');
-            // Wait a moment before refresh as Elastic updates not quite immediate.
-            setTimeout(function doPopulate() {
-              indiciaFns.populateDataSources();
-            }, 500);
+            indiciaFns.populateDataSources();
           } else if (response !== 'OK') {
             alert('Indicia records update failed');
           }
@@ -136,7 +150,7 @@
     } else if (status.query) {
       // No bulk API for query updates at the moment, so process one at a time.
       indiciaPostUrl = indiciaData.ajaxFormPostComment;
-      doc.identification.query = status.query;
+      docUpdates.identification.query = status.query;
       commentToSave = comment.trim() === ''
         ? 'This record has been queried.'
         : comment.trim();
@@ -162,7 +176,7 @@
     // Now post update to Elasticsearch.
     data = {
       ids: occurrenceIds,
-      doc: doc
+      doc: docUpdates
     };
     $.ajax({
       url: indiciaData.esProxyAjaxUrl + '/updateids/' + indiciaData.nid,
@@ -172,15 +186,14 @@
         if (typeof response.error !== 'undefined' || (response.code && response.code !== 200)) {
           alert(indiciaData.lang.verificationButtons.elasticsearchUpdateError);
         } else {
-          if (response.updated !== occurrenceIds.length) {
+          // Tolerate ES not updating a small percentage immediately. They will
+          // be picked up by Logstash.
+          if (response.updated < occurrenceIds.length * 0.8) {
             alert(indiciaData.lang.verificationButtons.elasticsearchUpdateError);
           } else {
             $('body > .loading-spinner').remove();
             if (occurrenceIds.length > 1) {
-              // Wait a moment before refresh as Elastic updates not quite immediate.
-              setTimeout(function doPopulate() {
-                indiciaFns.populateDataSources();
-              }, 500);
+              indiciaFns.populateDataSources();
             }
           }
           if (occurrenceIds.length === 1) {
@@ -344,7 +357,7 @@
    * Get HTML for the query by comment tab's form.
    */
   function getQueryCommentTab(doc, commentInstruct, warning) {
-    var commentTab = $('<fieldset class="comment-popup" data-ids="' + JSON.stringify([parseInt(doc.id, 10)]) + '"  />');
+    var commentTab = $('<fieldset class="comment-popup" data-ids="' + JSON.stringify([parseInt(doc.id, 10)]) + '" data-query="Q" />');
     $('<legend><span class="fas fa-question-circle fa-2x"></span>' +
       indiciaData.lang.verificationButtons.commentTabTitle + '</legend>')
       .appendTo(commentTab);
@@ -530,7 +543,6 @@
   function processEmail(e) {
     var email = {
       to: $('#email-to').val(),
-      from: indiciaData.siteEmail,
       subject: $('#email-subject').val(),
       body: $('#email-body').val()
     };
@@ -564,7 +576,7 @@
           email.body = email.body.replace(/\{{ photos }}/g, response.media);
           email.body = email.body.replace(/\{{ comments }}/g, response.comments);
           // save a comment to indicate that the mail was sent
-          saveVerifyComment([occurrenceId], { query: 'Q' }, indiciaData.lang.verificationButtons.emailLoggedAsComment);
+          saveVerifyComment([occurrenceId], { query: 'Q' }, indiciaData.lang.verificationButtons.emailLoggedAsComment, email);
           sendEmail(email);
         }
       });

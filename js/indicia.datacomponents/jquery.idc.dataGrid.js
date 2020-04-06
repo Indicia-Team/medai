@@ -189,6 +189,9 @@
             'beginning with the text you enter. Use * at the end of words to find words starting with. Use ' +
             '&quot;&quot; to group words into phrases and | between words to request either/or searches. Use - before ' +
             'a word to exclude that word from the search results.';
+        } else if (indiciaData.esMappings[this].type === 'date') {
+          title = 'Search for dates in the ' + caption + ' column. Searches can be in the format yyyy, yyyy-yyyy, ' +
+            'dd/mm/yyyy or dd/mm/yyyy hh:mm.';
         } else {
           title = 'Search for a number in the ' + caption + ' column. Prefix with ! to exclude rows which match the ' +
             'number you enter or separate a range with a hyphen (e.g. 123-456).';
@@ -530,7 +533,9 @@
           item = this.title;
         }
         if (this.path) {
-          link = this.path.replace('{rootFolder}', indiciaData.rootFolder);
+          link = this.path
+            .replace(/{rootFolder}/g, indiciaData.rootFolder)
+            .replace(/\{language\}/g, indiciaData.currentLanguage);
           if (this.urlParams) {
             link += link.indexOf('?') === -1 ? '?' : '&';
             $.each(this.urlParams, function eachParam(name, value) {
@@ -946,18 +951,29 @@
         var hit = this;
         var cells = [];
         var row;
-        var selectedClass;
+        var classes = ['data-row'];
         var doc = hit._source ? hit._source : hit;
-        var dataRowId;
+        var dataRowIdAttr;
         cells = getRowBehaviourCells(el);
         cells = cells.concat(getDataCells(el, doc, maxCharsPerCol));
         if (el.settings.actions.length) {
           cells.push('<td class="col-actions">' + getActionsForRow(el.settings.actions, doc) + '</td>');
         }
-        selectedClass = (el.settings.selectIdsOnNextLoad && $.inArray(hit._id, el.settings.selectIdsOnNextLoad) !== -1)
-          ? ' selected' : '';
-        dataRowId = hit._id ? ' data-row-id="' + hit._id + '"' : '';
-        row = $('<tr class="data-row' + selectedClass + '"' + dataRowId + '>'
+        if (el.settings.selectIdsOnNextLoad && $.inArray(hit._id, el.settings.selectIdsOnNextLoad) !== -1) {
+          classes.push('selected');
+        }
+        // Automatically add class for zero abundance data so it can be struck
+        // through.
+        if (doc.occurrence && doc.occurrence.zero_abundance === 'true') {
+          classes.push('zero-abundance');
+        }
+        if (el.settings.rowClasses) {
+          $.each(el.settings.rowClasses, function eachClass() {
+            classes.push(applyFieldReplacements(doc, this));
+          });
+        }
+        dataRowIdAttr = hit._id ? ' data-row-id="' + hit._id + '"' : '';
+        row = $('<tr class="' + classes.join(' ') + '"' + dataRowIdAttr + '>'
            + cells.join('') +
            '</tr>').appendTo($(el).find('tbody'));
         $(row).attr('data-doc-source', JSON.stringify(doc));

@@ -71,7 +71,8 @@
     Q: 'fas fa-question-circle',
     A: 'fas fa-reply',
     Sensitive: 'fas fa-exclamation-circle',
-    Confidential: 'fas fa-exclamation-triangle'
+    Confidential: 'fas fa-exclamation-triangle',
+    ZeroAbundance: 'fas fa-ban'
   };
 
   /**
@@ -90,7 +91,8 @@
     Q: 'Queried',
     A: 'Answered',
     Sensitive: 'Sensitive',
-    Confidential: 'Confidential'
+    Confidential: 'Confidential',
+    ZeroAbundance: 'Absence record'
   };
 
   /**
@@ -174,6 +176,60 @@
   };
 
   /**
+   * Detect date/time patterns and convert to a suitable ES query string.
+   */
+  indiciaFns.dateToEsFilter = function dateToEsFilter(text, field) {
+    // A series of possible date patterns, with the info required to build
+    // a query string.
+    var tests = [
+      {
+        // yyyy format.
+        pattern: '(\\d{4})',
+        format: '[`1`-01-01 TO `1`-12-31]'
+      },
+      {
+        // yyyy format.
+        pattern: '(\\d{4})-(\\d{4})',
+        format: '[`1`-01-01 TO `2`-12-31]'
+      },
+      {
+        // dd/mm/yyyy format.
+        pattern: '(\\d{2})\\/(\\d{2})\\/(\\d{4})',
+        format: '`3`-`2`-`1`'
+      },
+      {
+        // yyyy-mm-dd format.
+        pattern: '(\\d{4})\\-(\\d{2})\\-(\\d{2})',
+        format: '`1`-`2`-`3`'
+      },
+      {
+        // dd/mm/yyyy hh:mm format.
+        pattern: '(\\d{2})\\/(\\d{2})\\/(\\d{4}) (\\d{2})\\:(\\d{2})',
+        format: '["`3`-`2`-`1` `4`:`5`:00" TO "`3`-`2`-`1` `4`:`5`:59"]'
+      }
+    ];
+    var filter = false;
+    // Loop the patterns to find a match.
+    $.each(tests, function eachTest() {
+      var regex = new RegExp('^' + this.pattern + '$');
+      var match = text.match(regex);
+      var value = this.format;
+      var i;
+      if (match) {
+        // Got a match, so reformat and build the filter string.
+        for (i = 1; i < match.length; i++) {
+          value = value.replace(new RegExp('`' + i + '`', 'g'), match[i]);
+        }
+        filter = field + ':' + value;
+        // Abort the search.
+        return false;
+      }
+      return true;
+    });
+    return filter;
+  };
+
+  /**
    * Utility function to retrieve status icon HTML from a status code.
    *
    * @param object flags
@@ -217,6 +273,9 @@
     }
     if (flags.confidential && flags.confidential !== 'false') {
       addIcon('Confidential');
+    }
+    if (flags.confidential && flags.confidential !== 'false') {
+      addIcon('ZeroAbundance');
     }
     return html;
   };
@@ -283,6 +342,49 @@
    * doc which are not simple values.
    */
   indiciaFns.fieldConvertors = {
+
+    /**
+     * Output an associations summary.
+     */
+    associations: function associations(doc) {
+      var output = [];
+      if (doc.occurrence.associations) {
+        $.each(doc.occurrence.associations, function eachAssociation() {
+          var label = '<em>' + this.accepted_name + '</a>';
+          if (this.vernacular_name) {
+            label = this.vernacular_name + '(' + label + ')';
+          }
+          output.push(label);
+        });
+      }
+      return output.join('; ');
+    },
+
+    /**
+     * Output an attribute value.
+     *
+     * Pass 2 parameters:
+     * * The entity name (event (=sample) or occurrence).
+     * * The attribute ID.
+     *
+     * Multiple attribute values are returned as a single semi-colon separated
+     * value.
+     */
+    attr_value: function attr_value(doc, params) {
+      var output = [];
+      var entity = params && params.length > 1 ? params[0] : '';
+      // Tolerate sample or event for entity parameter.
+      entity = entity === 'sample' ? 'event' : entity;
+      if (doc[entity] && doc[entity].attributes) {
+        $.each(doc[entity].attributes, function eachAttr() {
+          if (this.id === params[1]) {
+            output.push(this.value);
+          }
+        });
+      }
+      return output.join('; ');
+    },
+
     /**
      * Record status and other flag icons.
      */
@@ -292,7 +394,8 @@
         substatus: doc.identification.verification_substatus,
         query: doc.identification.query ? doc.identification.query : '',
         sensitive: doc.metadata.sensitive,
-        confidential: doc.metadata.confidential
+        confidential: doc.metadata.confidential,
+        zero_abundance: doc.occurrence.zero_abundance,
       });
     },
 
@@ -418,6 +521,63 @@
    * The builder can assume that the input text value is already trimmed.
    */
   indiciaFns.fieldConvertorQueryBuilders = {
+
+    /**
+     * Builds a nested query for association columns.
+     */
+    associations: function associations(text) {
+      var query = {
+        nested: {
+          path: 'occurrence.associations',
+          query: {
+            bool: {
+              must: [
+                {
+                  query_string: {
+                    query: text
+                  }
+                }
+              ]
+            }
+          }
+        }
+      };
+      return {
+        bool_clause: 'must',
+        value: '',
+        query: JSON.stringify(query)
+      };
+    },
+
+    /**
+     * Builds a nested query for association columns.
+     */
+    attr_value: function attr_value(text, params) {
+      var filter1 = {};
+      var filter2 = {};
+      var query;
+      filter1[params[0] + '.attributes.id'] = params[1];
+      filter2[params[0] + '.attributes.value'] = text;
+      query = {
+        nested: {
+          path: params[0] + '.attributes',
+          query: {
+            bool: {
+              must: [
+                { match: filter1 },
+                { match: filter2 }
+              ]
+            }
+          }
+        }
+      };
+      return {
+        bool_clause: 'must',
+        value: '',
+        query: JSON.stringify(query)
+      };
+    },
+
     /**
      * Handle datasource_code filtering in format website_id [| survey ID].
      */
@@ -443,53 +603,7 @@
      * Supports yyyy, mm/dd/yyyy or yyyy-mm-dd formats.
      */
     event_date: function eventDate(text) {
-      // A series of possible date patterns, with the info required to build
-      // a query string.
-      var tests = [
-        {
-          // yyyy format.
-          pattern: '(\\d{4})',
-          field: 'event.year',
-          format: '{1}'
-        },
-        {
-          // yyyy format.
-          pattern: '(\\d{4})-(\\d{4})',
-          field: 'event.year',
-          format: '[{1} TO {2}]'
-        },
-        {
-          // dd/mm/yyyy format.
-          pattern: '(\\d{2})\\/(\\d{2})\\/(\\d{4})',
-          field: 'event.date_start',
-          format: '{3}-{2}-{1}'
-        },
-        {
-          // yyyy-mm-dd format.
-          pattern: '(\\d{4})\\-(\\d{2})\\-(\\d{2})',
-          field: 'event.date_start',
-          format: '{1}-{2}-{3}'
-        }
-      ];
-      var filter = false;
-      // Loop the patterns to find a match.
-      $.each(tests, function eachTest() {
-        var regex = new RegExp('^' + this.pattern + '$');
-        var match = text.match(regex);
-        var value = this.format;
-        var i;
-        if (match) {
-          // Got a match, so reformat and build the filter string.
-          for (i = 1; i < match.length; i++) {
-            value = value.replace('{' + i + '}', match[i]);
-          }
-          filter = this.field + ':' + value;
-          // Abort the search.
-          return false;
-        }
-        return true;
-      });
-      return filter;
+      return indiciaFns.dateToEsFilter(text, 'event.date_start');
     },
 
     /**
@@ -663,8 +777,20 @@
               });
             }
           } else if (indiciaData.esMappings[field].type === 'keyword' || indiciaData.esMappings[field].type === 'text') {
-            // Normal text filter
+            // Normal text filter.
             data.textFilters[field] = $(this).val().trim();
+          } else if (indiciaData.esMappings[field].type === 'date') {
+            // Date filter.
+            query = indiciaFns.dateToEsFilter($(this).val().trim(), field);
+            if (query === false) {
+              $(this).after('<span title="Invalid search text" class="fas fa-exclamation-circle"></span>');
+            } else {
+              data.bool_queries.push({
+                bool_clause: 'must',
+                query_type: 'query_string',
+                value: query
+              });
+            }
           } else {
             // Normal numeric filter.
             data.numericFilters[field] = $(this).val().trim();
@@ -747,7 +873,8 @@
             query_type: this.query_type,
             field: this.field ? this.field : null,
             query: this.query ? this.query : null,
-            value: this.value ? this.value : null
+            value: this.value ? this.value : null,
+            nested: this.nested ? this.nested : null
           });
         });
       });

@@ -25,3 +25,8 @@ body {
 #footer {
   padding: $block-padding 0;
 }
+
+/* Ensure ui-front overrides Fancybox z-index */
+body .ui-front {
+  z-index: 9999;
+}

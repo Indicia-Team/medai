@@ -68,6 +68,31 @@ jQuery UI widgets - override existing UI plugons.
     },
 
     /**
+     * Public method to add values to the search filter.
+     *
+     * Can be called via $('...').indiciaAutocomplete('setExtraParams', []);
+     *
+     * @param array values
+     */
+    unsetExtraParams: function(values) {
+      $.extend(this.options.extraParams, values);
+    },
+
+    /**
+     * Public method to remove values from the search filter.
+     *
+     * Can be called via $('...').indiciaAutocomplete('unsetExtraParams', []);
+     *
+     * @param array values
+     */
+    unsetExtraParams: function(values) {
+      var el = this;
+      $.each(values, function eachValue() {
+        delete el.options.extraParams[this];
+      });
+    },
+
+    /**
      * If user changes text in the input, clear the stored value.
      */
     _onChange: function() {

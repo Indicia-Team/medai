@@ -327,7 +327,7 @@ jQuery(document).ready(function ($) {
           $('#species-group-tab .context-instruct').show();
         }
         else if ($('input#taxon_group_list\\:search\\:q').length > 0) {
-          $('input#taxon_group_list\\:search\\:q').unsetExtraParams('query');
+          $('input#taxon_group_list\\:search\\:q').indiciaAutocomplete('unsetExtraParams', ['query']);
         }
         // need to load the sub list control for taxon groups.
         $('#taxon_group_list\\:sublist').children().remove();
@@ -946,7 +946,7 @@ jQuery(document).ready(function ($) {
           view: 'detail',
           created_by_id: indiciaData.user_id
         });
-        $('input#location_list\\:search\\:name').unsetExtraParams('location_type_id');
+        $('input#location_list\\:search\\:name').indiciaAutocomplete('unsetExtraParams', ['location_type_id']);
       }
     } else if ($('#site-type').val().match(/^[0-9]+$/)) {
       // a location_type_id selected
@@ -955,7 +955,7 @@ jQuery(document).ready(function ($) {
         view: 'list',
         location_type_id: $('#site-type').val()
       });
-      $('input#location_list\\:search\\:name').unsetExtraParams('created_by_id');
+      $('input#location_list\\:search\\:name').indiciaAutocomplete('unsetExtraParams', ['created_by_id']);
     } else {
       // a shortcut site from the site-types list
       $('#location_list\\:box').hide();

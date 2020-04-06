@@ -18,6 +18,10 @@ body {
 #footer {
   padding: 15px 0; }
 
+/* Ensure ui-front overrides Fancybox z-index */
+body .ui-front {
+  z-index: 9999; }
+
 .report-grid {
   width: 100%;
   margin-bottom: 15px; }

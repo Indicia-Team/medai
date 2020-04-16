@@ -74,6 +74,22 @@
     var indiciaPostUrl;
     var requests = 0;
     var currentDoc;
+    if (email && indiciaData.workflowEnabled) {
+      // This will only be the case when querying a single record. If the
+      // species requires fully logged comms, add the email body to the
+      // comment.
+      currentDoc = JSON.parse($(dataGrid).find('tr.selected').attr('data-doc-source'));
+      if (indiciaData.workflowTaxonMeaningIDsLogAllComms.indexOf(currentDoc.taxon.taxon_meaning_id) !== -1) {
+        data['occurrence_comment:correspondence_data'] = JSON.stringify({
+          email: [{
+            from: indiciaData.siteEmail,
+            to: email.to,
+            subject: email.subject,
+            body: email.body
+          }]
+        });
+      }
+    }
     // Since this might be slow.
     $('body').append('<div class="loading-spinner"><div>Loading...</div></div>');
     if (status.status) {
@@ -96,25 +112,7 @@
         });
       } else {
         indiciaPostUrl = indiciaData.ajaxFormPostSingleVerify;
-        $.extend(data, {
-          'occurrence:ids': occurrenceIds.join(',')
-        });
-        if (email && indiciaData.workflowEnabled) {
-          // This will only be the case when querying a single record. If the
-          // species requires fully logged comms, add the email body to the
-          // comment.
-          currentDoc = JSON.parse($(dataGrid).find('tr.selected').attr('data-doc-source'));
-          if (indiciaData.workflowTaxonMeaningIDsLogAllComms.indexOf(currentDoc.taxon.taxon_meaning_id) !== -1) {
-            data['occurrence_comment:correspondence_data'] = JSON.stringify({
-              email: [{
-                from: indiciaData.siteEmail,
-                to: email.to,
-                subject: email.subject,
-                body: email.body
-              }]
-            });
-          }
-        }
+        data['occurrence:ids'] = occurrenceIds.join(',');
       }
       docUpdates.identification.verification_status = status.status[0];
       if (status.status.length > 1) {
@@ -186,17 +184,15 @@
         if (typeof response.error !== 'undefined' || (response.code && response.code !== 200)) {
           alert(indiciaData.lang.verificationButtons.elasticsearchUpdateError);
         } else {
-          // Tolerate ES not updating a small percentage immediately. They will
-          // be picked up by Logstash.
-          if (response.updated < occurrenceIds.length * 0.8) {
+          // Check updated count is as expected.
+          if (response.updated < occurrenceIds.length) {
             alert(indiciaData.lang.verificationButtons.elasticsearchUpdateError);
-          } else {
-            $('body > .loading-spinner').remove();
-            if (occurrenceIds.length > 1) {
-              indiciaFns.populateDataSources();
-            }
           }
-          if (occurrenceIds.length === 1) {
+          // Refresh and cleanup.
+          $('body > .loading-spinner').remove();
+          if (occurrenceIds.length > 1) {
+            indiciaFns.populateDataSources();
+          } else if (occurrenceIds.length === 1) {
             $(dataGrid).idcDataGrid('hideRowAndMoveNext');
           }
           $(dataGrid).find('.multiselect-all').prop('checked', false);

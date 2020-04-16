@@ -395,7 +395,7 @@
         query: doc.identification.query ? doc.identification.query : '',
         sensitive: doc.metadata.sensitive,
         confidential: doc.metadata.confidential,
-        zero_abundance: doc.occurrence.zero_abundance,
+        zero_abundance: doc.occurrence.zero_abundance
       });
     },
 
@@ -550,7 +550,7 @@
     },
 
     /**
-     * Builds a nested query for association columns.
+     * Builds a query for attribute values.
      */
     attr_value: function attr_value(text, params) {
       var filter1 = {};
@@ -695,6 +695,23 @@
   };
 
   /**
+   * Walk down a path in a document to find a value.
+   */
+  indiciaFns.iterateDownPath = function iterateDownPath(doc, path) {
+    var pathArray = path.split('.');
+    var i;
+    var thisPath = doc;
+    for (i = 0; i < pathArray.length; i++) {
+      if (typeof thisPath[pathArray[i]] === 'undefined') {
+        thisPath = '';
+        break;
+      }
+      thisPath = thisPath[pathArray[i]];
+    }
+    return thisPath;
+  };
+
+  /**
    * Retrieves a field value from the document.
    *
    * @param object doc
@@ -703,34 +720,34 @@
    *   Name of the field. Either a path to the field in the document (such as
    *   taxon.accepted_name) or a special field name surrounded by # characters,
    *   e.g. #locality.
+   * @param object colDef
+   *   Optional definition of the column.
    */
-  indiciaFns.getValueForField = function getValueForField(doc, field) {
-    var i;
-    var valuePath = doc;
-    var fieldPath = field.split('.');
+  indiciaFns.getValueForField = function getValueForField(doc, field, colDef) {
     var convertor;
+    // Find location of fields nested in ES response.
+    var valuePath = (colDef && colDef.path) ? indiciaFns.iterateDownPath(doc, colDef.path) : doc;
     // Special field handlers are in the list of convertors.
     if (field.match(/^#/)) {
       // Find the convertor definition between the hashes. If there are
       // colons, stuff that follows the first colon are parameters.
       convertor = field.replace(/^#(.+)#$/, '$1').split(':');
       if (typeof indiciaFns.fieldConvertors[convertor[0]] !== 'undefined') {
-        return indiciaFns.fieldConvertors[convertor[0]](doc, convertor.slice(1));
+        return indiciaFns.fieldConvertors[convertor[0]](valuePath, convertor.slice(1));
       }
     }
     // If not a special field, work down the document hierarchy according to
     // the field's path components.
-    for (i = 0; i < fieldPath.length; i++) {
-      if (typeof valuePath[fieldPath[i]] === 'undefined') {
-        valuePath = '';
-        break;
-      }
-      valuePath = valuePath[fieldPath[i]];
-    }
+    valuePath = indiciaFns.iterateDownPath(valuePath, field);
     // Reformat date fields to user-friendly format.
     // @todo Localisation for non-UK dates.
     if (field.match(/_on$/)) {
       valuePath = valuePath.replace(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}).*/, '$3/$2/$1 $4:$5');
+    }
+    // Path might be to an aggregation response object, in which case we just
+    // want the value.
+    if (typeof valuePath === 'object' && colDef && colDef.agg) {
+      return valuePath.value;
     }
     return valuePath;
   };
@@ -831,7 +848,7 @@
       }
     }
     val = $(input).attr(dataName);
-    return val ? val : null;
+    return val || null;
   };
 
   /**
@@ -842,8 +859,15 @@
    *
    * Returns false if the query is linked to a grid selection but there is no
    * selected row.
+   *
+   * @param object source
+   *   The source object.
+   * @param bool doingCount
+   *   Set to true if getting query data for a request intended to count a
+   *   dataset rather than retrieve data. Disables from, sort options and
+   *   uses the countAggregation if specified.
    */
-  indiciaFns.getFormQueryData = function getFormQueryData(source) {
+  indiciaFns.getFormQueryData = function getFormQueryData(source, doingCount) {
     var data = {
       textFilters: {},
       numericFilters: {},
@@ -855,14 +879,17 @@
     var bounds;
     var agg = {};
     var filterRows = [];
-    if (source.settings.size) {
+    if (typeof source.settings.size !== 'undefined') {
       data.size = source.settings.size;
     }
-    if (source.settings.from) {
-      data.from = source.settings.from;
-    }
-    if (source.settings.sort) {
-      data.sort = source.settings.sort;
+    if (!doingCount) {
+      if (source.settings.from) {
+        data.from = source.settings.from;
+      }
+      // Sort order of returned documents - only useful for non-aggregated data.
+      if (source.settings.sort && !source.settings.aggregation) {
+        data.sort = source.settings.sort;
+      }
     }
     if (source.settings.filterBoolClauses) {
       // Using filter paremeter controls.
@@ -950,10 +977,15 @@
       }
     }
     if (source.settings.aggregation) {
-      // Copy to avoid changing original.
-      $.extend(true, agg, source.settings.aggregation);
-      // Find the map bounds if limited to the viewport of a map.
-      if (source.settings.filterBoundsUsingMap) {
+      // Copy to avoid changing original. Use count aggregation where a
+      // separate agg needed to count against.
+      if (doingCount && source.settings.countAggregation) {
+        $.extend(true, agg, source.settings.countAggregation);
+      } else {
+        $.extend(true, agg, source.settings.aggregation);
+      }
+      // Find the map bounds if limited to the viewport of a map and not counting total.
+      if (source.settings.filterBoundsUsingMap && !doingCount) {
         mapToFilterTo = $('#' + source.settings.filterBoundsUsingMap);
         if (mapToFilterTo.length === 0 || !mapToFilterTo[0].map) {
           alert('Data source incorrectly configured. @filterBoundsUsingMap does not point to a valid map.');

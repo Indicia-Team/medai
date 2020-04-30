@@ -32,27 +32,19 @@ var IdcEsDataSource;
    * For autoAggregationTable mode. Sets default to the unique field if not
    * set.
    */
-  function getSortInfo(source) {
-    var sortField;
-    var sortDir;
+  function getAutoAggSortInfo(source) {
     var settings = source.settings;
     // Default source config to sort by the unique field unless otherwise specified.
     if (!settings.sort || settings.sort.length === 0) {
       settings.sort = {};
-      settings.sort[settings.autoAggregationTable.unique_field] = {
-        order: 'asc'
-      };
+      settings.sort[settings.autoAggregationTable.unique_field] = 'asc';
     }
-    // Find the sort field and direction from the source config.
-    $.each(settings.sort, function eachSortField(field) {
-      sortField = field;
-      sortDir = this.order;
-      // Only support a single sort field.
-      return false;
-    });
+    // Find the sort field and direction from the source config. Only single
+    // supported in autoAggregationTable mode at present. Doc_count is a
+    // special value that sorts by _count.
     return {
-      field: sortField,
-      dir: sortDir
+      field: Object.keys(settings.sort)[0] === 'doc_count' ? '_count' : Object.keys(settings.sort)[0],
+      dir: settings.sort[Object.keys(settings.sort)[0]]
     };
   }
 
@@ -64,9 +56,11 @@ var IdcEsDataSource;
     var sort;
     var orderBy;
     var settings = source.settings;
+    var uniqueFieldWithoutSuffix;
+    var sortFieldWithoutSuffix;
     if (settings.autoAggregationTable) {
       settings.size = 0;
-      sort = getSortInfo(source);
+      sort = getAutoAggSortInfo(source);
       // List of sub-aggregations within the outer terms agg for the unique field must
       // always contain a top_hits agg to retrieve field values.
       subAggs = {
@@ -91,12 +85,15 @@ var IdcEsDataSource;
         }
       });
       // Include the unique field in the list of fields request even if not specified.
-      if ($.inArray(settings.autoAggregationTable.unique_field, settings.autoAggregationTable.fields) === -1) {
-        settings.autoAggregationTable.fields.push(settings.autoAggregationTable.unique_field);
+      // Don't include .keyword suffix for source filtering.
+      uniqueFieldWithoutSuffix = settings.autoAggregationTable.unique_field.replace(/\.keyword$/, '');
+      if ($.inArray(uniqueFieldWithoutSuffix, settings.autoAggregationTable.fields) === -1) {
+        settings.autoAggregationTable.fields.push(uniqueFieldWithoutSuffix);
       }
-      if ($.inArray(sort.field, settings.autoAggregationTable.fields) > -1) {
+      sortFieldWithoutSuffix = sort.field.replace(/\.keyword$/, '');
+      if ($.inArray(sortFieldWithoutSuffix, settings.autoAggregationTable.fields) > -1) {
         // Sorting by a standard field.
-        if (sort.field === settings.autoAggregationTable.unique_field) {
+        if (sortFieldWithoutSuffix === uniqueFieldWithoutSuffix) {
           // Using the outer agg to sort, so simple use of _key.
           orderBy = '_key';
         } else {

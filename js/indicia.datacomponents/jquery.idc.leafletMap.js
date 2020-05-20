@@ -145,6 +145,14 @@
       }
       if (config.type === 'circle' || config.type === 'square' || config.type === 'geom') {
         config.options = $.extend({ radius: 'metric', fillOpacity: 0.5 }, config.options);
+        if (!config.options.size && indiciaData.esSourceObjects[sourceId].settings.mapGridSquareSize) {
+          config.options.size = indiciaData.esSourceObjects[sourceId].settings.mapGridSquareSize;
+          if (config.options.size === 'autoGridSquareSize') {
+            // Calculate according to map zoom.
+            config.options.size = $(el).idcLeafletMap('getAutoSquareSize');
+          }
+        }
+        // If size is auto, override it.
         indiciaFns.findAndSetValue(config.options, 'size', $(el).idcLeafletMap('getAutoSquareSize'), 'autoGridSquareSize');
         // Apply metric to any options that are supposed to use it.
         $.each(config.options, function eachOption(key, value) {
@@ -667,9 +675,9 @@
       });
       // Are there aggregations to map?
       if (typeof response.aggregations !== 'undefined') {
-        if (sourceSettings.aggregationMapMode === 'geoHash') {
+        if (sourceSettings.mode === 'mapGeoHash') {
           mapGeoHashAggregation(el, response, sourceSettings);
-        } else if (sourceSettings.aggregationMapMode === 'gridSquare') {
+        } else if (sourceSettings.mode === 'mapGridSquare') {
           mapGridSquareAggregation(el, response, sourceSettings);
         }
       }

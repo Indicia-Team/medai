@@ -262,7 +262,7 @@
     }
     $('<div class="form-group">' +
         '<label for="comment-textarea">Add the following comment:</label>' +
-        '<textarea id="comment-textarea" class="form-control" rows="6" />' +
+        '<textarea id="comment-textarea" class="form-control" rows="6"></textarea>' +
       '</div>').appendTo(fs);
     $('<button class="btn btn-primary">Save</button>').appendTo(fs);
     $.fancybox(fs);
@@ -306,7 +306,8 @@
     });
     r.push('{{ photos }}');
     r.push('{{ comments }}');
-    r.push('{{ quickReplyLink }}');
+    r.push('* {{ emailReplyOption }}');
+    r.push('* {{ commentReplyOption }}');
     return r.join('\n');
   }
 
@@ -362,7 +363,7 @@
       .appendTo(commentTab);
     $('<div class="form-group">' +
         '<label for="comment-textarea">Add the following comment:</label>' +
-        '<textarea id="comment-textarea" class="form-control" rows="6" />' +
+        '<textarea id="comment-textarea" class="form-control" rows="6"></textarea>' +
       '</div>').appendTo(commentTab);
     $('<button class="btn btn-primary">Add comment</button>').appendTo(commentTab);
     return commentTab;
@@ -556,13 +557,15 @@
     var authorisationParam = '&auth=' + authorisationNumber;
     var commentQuickReplyPageLink = '<a href="' + indiciaData.warehouseUrl + 'occurrence_comment_quick_reply_page.php?occurrence_id=' +
         occurrenceId + personIdentifierParam + authorisationParam + '">' +
-        indiciaData.lang.verificationButtons.replyToThisQuery + '</a>';
+        indiciaData.lang.verificationButtons.commentReplyInstruct + '</a>';
     // Complete creation of email of record details
     if (emailFormvalidator.numberOfInvalids() === 0) {
       // Save info required for quick reply.
       saveAuthorisationNumberToDb(authorisationNumber, occurrenceId);
-      // Replace the text token from the email with the actual link.
-      email.body = email.body.replace('{{ quickReplyLink }}', commentQuickReplyPageLink);
+      // Replace the text tokens from the email with the actual text/link.
+      email.body = email.body
+        .replace('{{ emailReplyOption }}', indiciaData.lang.verificationButtons.emailReplyInstruct)
+        .replace('{{ commentReplyOption }}', commentQuickReplyPageLink);
       // Ensure media and comments are loaded.
       $.ajax({
         url: indiciaData.esProxyAjaxUrl + '/mediaAndComments/' + indiciaData.nid + urlSep +

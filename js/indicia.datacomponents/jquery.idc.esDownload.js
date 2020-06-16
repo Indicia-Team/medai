@@ -20,6 +20,8 @@
  * @link https://github.com/indicia-team/client_helpers
  */
 
+ /* eslint no-underscore-dangle: ["error", { "allow": ["_count"] }] */
+
  /**
  * Output plugin for data downloads.
  */
@@ -122,7 +124,7 @@
       $.each(sourceSettings.fields, function eachField() {
         data.addColumns.push({
           field: 'key.' + this.asCompositeKeyName(),
-          caption: this.asReadableKeyName(),
+          caption: this.asReadableKeyName()
         });
       });
       // The agg should also contain aggregation for calculated columns.
@@ -195,14 +197,15 @@
       if (lastResponse.scroll_id) {
         // Scrolls remember the search query so only need the scroll ID.
         query += '&scroll_id=' + lastResponse.scroll_id;
-        // Scrolling remembers all the settings server-side.
-        currentRequestData = {};
+        // Scrolling remembers all the settings server-side except for cols
+        // template.
+        currentRequestData = getColumnSettings(el);
       } else if (el.settings.sourceObject.settings.mode.match(/Aggregation$/)) {
         // Inform the warehouse as composite paging behaviour different. The
         // uniq_id allows the warehouse to relocate the last request's after_key.
         query += '&aggregation_type=composite';
         // No need to recount!
-        delete currentRequestData.aggs.count;
+        delete currentRequestData.aggs._count;
       }
       // Post to the ES proxy. Pass scroll_id (docs) or after_key (composite aggregations)
       // parameter to request the next chunk of the dataset.
@@ -231,8 +234,7 @@
       minutes = '0' + date.getMinutes();
       minutes = minutes.substr(minutes.length - 2);
       description = 'File containing ' + lastResponse.done +
-        (el.settings.sourceObject.settings.mode === 'compositeAggregation' ? ' items. ' : ' occurrences. ');
-
+        (el.settings.sourceObject.settings.mode.match(/Aggregation$/) ? ' items. ' : ' occurrences. ');
       $(el).find('.progress-circle-container').addClass('download-done');
       $(el).find('.idc-download-files').append('<div><a href="' + lastResponse.filename + '">' +
         '<span class="fas fa-file-archive fa-2x"></span>' +
@@ -279,7 +281,7 @@
       if (srcSettings.mode.match(/Aggregation$/)) {
         query += '&aggregation_type=composite';
         // Arbitrary choice of page size.
-        currentRequestData.aggs.rows.composite.size = 500;
+        currentRequestData.aggs._rows.composite.size = 500;
       }
       $.extend(currentRequestData, columnSettings);
       // Reset.

@@ -20,7 +20,7 @@
  * @link https://github.com/indicia-team/client_helpers
  */
 
-/* eslint no-underscore-dangle: ["error", { "allow": ["_id", "_source", "_latlng"] }] */
+/* eslint no-underscore-dangle: ["error", { "allow": ["_id", "_source", "_latlng", "_idfield"] }] */
 /* eslint no-extend-native: ["error", { "exceptions": ["String"] }] */
 /* eslint no-param-reassign: ["error", { "props": false }]*/
 
@@ -48,7 +48,7 @@
    * not confused with paths in the document.
    */
   String.prototype.asCompositeKeyName = function asCompositeKeyName() {
-    return this.replace(/\./g, '-');
+    return this.replace(/[\.#:]/g, '-');
   };
 
   /**
@@ -269,7 +269,8 @@
     var date;
     var month;
     var day;
-    if (typeof dateString === 'string' && dateString.trim() === '') {
+    if (typeof dateString === 'undefined' ||
+        (typeof dateString === 'string' && dateString.trim() === '')) {
       return '';
     }
     date = new Date(dateString);
@@ -503,23 +504,25 @@
    */
   indiciaFns.expandSpecialFieldSortInfo = function expandSpecialFieldSortInfo(sort, withKeyword) {
     var sortInfo = {};
-    $.each(sort, function eachSortField(field, dir) {
-      if (indiciaData.fieldConvertorSortFields[field.simpleFieldName()] &&
-          $.isArray(indiciaData.fieldConvertorSortFields[field.simpleFieldName()])) {
-        $.each(indiciaData.fieldConvertorSortFields[field.simpleFieldName()], function eachUnderlyingField() {
-          sortInfo[this] = dir;
-        });
-      } else if (indiciaData.fieldConvertorSortFields[field.simpleFieldName()]) {
-        sortInfo = indiciaData.fieldConvertorSortFields[field.simpleFieldName()];
-      } else if (withKeyword) {
-        // Normal field with keyword ready to send to ES.
-        sortInfo[indiciaFns.esFieldWithKeywordSuffix(field)] = dir;
-      } else {
-        // If just getting sort info, not sending to ES, then easier without keyword
-        // for comparison with field names.
-        sortInfo[field.replace(/\.keyword$/, '')] = dir;
-      }
-    });
+    if (sort) {
+      $.each(sort, function eachSortField(field, dir) {
+        if (indiciaData.fieldConvertorSortFields[field.simpleFieldName()] &&
+            $.isArray(indiciaData.fieldConvertorSortFields[field.simpleFieldName()])) {
+          $.each(indiciaData.fieldConvertorSortFields[field.simpleFieldName()], function eachUnderlyingField() {
+            sortInfo[this] = dir;
+          });
+        } else if (indiciaData.fieldConvertorSortFields[field.simpleFieldName()]) {
+          sortInfo = indiciaData.fieldConvertorSortFields[field.simpleFieldName()];
+        } else if (withKeyword) {
+          // Normal field with keyword ready to send to ES.
+          sortInfo[indiciaFns.esFieldWithKeywordSuffix(field)] = dir;
+        } else {
+          // If just getting sort info, not sending to ES, then easier without keyword
+          // for comparison with field names.
+          sortInfo[field.replace(/\.keyword$/, '')] = dir;
+        }
+      });
+    }
     return sortInfo;
   };
 
@@ -634,8 +637,8 @@
      */
     event_date: function eventDate(doc) {
       var root = doc.event || doc.key || doc;
-      var start = root.date_start ? indiciaFns.formatDate(root.date_start) : '';
-      var end = root.date_end ? indiciaFns.formatDate(root.date_end) : '';
+      var start = indiciaFns.formatDate(root.date_start || root['event-date_start']);
+      var end = indiciaFns.formatDate(root.date_end || root['event-date_end']);
       if (!start && !end) {
         return 'Unknown';
       }
@@ -1014,9 +1017,9 @@
       valuePath = valuePath.replace(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}).*/, '$3/$2/$1 $4:$5');
     }
     // Path might be to an aggregation response object, in which case we just
-    // want the value.
-    if (valuePath && typeof valuePath === 'object' && typeof valuePath.value !== 'undefined') {
-      return valuePath.value;
+    // want the value (or value_as_string if aggregation format specified).
+    if (valuePath && typeof (valuePath.value_as_string || valuePath.value) !== 'undefined') {
+      return valuePath.value_as_string || valuePath.value;
     }
     return valuePath;
   };
@@ -1249,8 +1252,8 @@
     if (source.settings.aggregation) {
       // Copy to avoid changing original.
       $.extend(true, agg, source.settings.aggregation);
-      if (doingCount && source.settings.mode === 'termAggregation' && agg.idfield) {
-        delete agg.idfield.terms.order;
+      if (doingCount && source.settings.mode === 'termAggregation' && agg._idfield) {
+        delete agg._idfield.terms.order;
       }
       // Find the map bounds if limited to the viewport of a map and not counting total.
       if (!doingCount && source.settings.filterBoundsUsingMap) {

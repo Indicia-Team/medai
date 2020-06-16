@@ -20,7 +20,7 @@
  * @link https://github.com/indicia-team/client_helpers
  */
 
- /* eslint no-underscore-dangle: ["error", { "allow": ["_id", "_source"] }] */
+ /* eslint no-underscore-dangle: ["error", { "allow": ["_id", "_source", "_count"] }] */
  /* eslint no-param-reassign: ["error", { "props": false }]*/
 
 /**
@@ -43,7 +43,9 @@
     aggregation: null,
     cookies: true,
     includeColumnHeadings: true,
+    includeColumnSettingsTool: true,
     includeFilterRow: true,
+    includeFullScreenTool: true,
     includePager: true,
     sortable: true,
     responsive: true,
@@ -138,17 +140,24 @@
       var colDef = el.settings.availableColumnInfo[this.field];
       var heading = colDef.caption;
       var footableExtras = '';
-      var sortableField = typeof indiciaData.esMappings[this.field] !== 'undefined'
-        && indiciaData.esMappings[this.field].sort_field;
+      var sortableField = false;
       // Tolerate hyphen or camelCase.
       var hideBreakpoints = colDef.hideBreakpoints || colDef['hide-breakpoints'];
       var dataType = colDef.dataType || colDef['data-type'];
-      sortableField = sortableField
-        || indiciaData.fieldConvertorSortFields[this.field.simpleFieldName()]
-        // Simple top level terms agg columns should sort OK.
-        || (srcSettings.mode !== 'compositeAggregation' && aggInfo && aggInfo[this.field])
-        // Doc_count treated like a special agg - supports sort.
-        || (srcSettings.mode !== 'compositeAggregation' && aggInfo && this.field === 'doc_count');
+      if (srcSettings.mode === 'docs') {
+        // Either a standard field, or a special field which provides an
+        // associated sort field.
+        sortableField = (indiciaData.esMappings[this.field] && indiciaData.esMappings[this.field].sort_field) ||
+          indiciaData.fieldConvertorSortFields[this.field.simpleFieldName()];
+      } else if (srcSettings.mode === 'compositeAggregation') {
+        // CompositeAggregation can sort on any field column, not aggregations.
+        sortableField = !(aggInfo[this.field] || this.field === 'doc_count');
+      } else if (srcSettings.mode === 'termAggregation') {
+        // Term aggregations allow sort on the aggregation cols, or fields if
+        // numeric or date, but not normal text fields.
+        sortableField = aggInfo[this.field] || this.field === 'doc_count' ||
+          (indiciaData.esMappings[this.field] && !indiciaData.esMappings[this.field].type.match(/^(text|keyword)$/));
+      }
       if (el.settings.sortable !== false && sortableField) {
         heading += '<span class="sort fas fa-sort"></span>';
       }
@@ -221,16 +230,22 @@
     });
   }
 
+  /**
+   * Apply settings that are dependent on the source's mode.
+   */
   function applySourceModeSettings(el) {
     var sourceSettings = el.settings.sourceObject.settings;
+    var pathsPerMode = {
+      compositeAggregation: 'key',
+      termAggregation: 'fieldlist.hits.hits.0._source'
+    };
     if (sourceSettings.mode.match(/Aggregation$/)) {
+      // Columns linked to aggregation's fields array need to have a path
+      // in the response document defined.
       $.each(el.settings.availableColumnInfo, function eachCol(field, colDef) {
-        if ($.inArray(field, sourceSettings.fields) > -1) {
-          if (sourceSettings.mode === 'termAggregation') {
-            colDef.path = 'fieldlist.hits.hits.0._source';
-          } else if (sourceSettings.mode === 'compositeAggregation') {
-            colDef.path = 'key';
-          }
+        // Everything not in the aggregations list must be a field.
+        if (!sourceSettings.suppliedAggregation[field] && field !== 'doc_count') {
+          colDef.path = pathsPerMode[sourceSettings.mode];
         }
       });
     }
@@ -287,25 +302,6 @@
     $(headingRow).find('.sort.fas').addClass('fa-sort');
     $(sortButton).removeClass('fa-sort');
     $(sortButton).addClass('fa-sort-' + (sortDesc ? 'down' : 'up'));
-  }
-
-  /**
-   * Apply changes to a source when sorting on a special field column.
-   */
-  function handleSortForSpecialField(source, fieldName, sortDesc) {
-    var sortFields = indiciaData.fieldConvertorSortFields[fieldName];
-    if ($.isArray(sortFields)) {
-      $.each(sortFields, function eachField() {
-        // A simple list of fields to sort on, so set the direction on each.
-        source.settings.sort[this] = {
-          order: sortDesc ? 'desc' : 'asc'
-        };
-      });
-    } else if (typeof sortFields === 'object') {
-      // A complex sort object (e.g. lat_lon distance).
-      source.settings.sort = sortFields;
-      indiciaFns.findAndSetValue(source.settings.sort, 'order', sortDesc ? 'desc' : 'asc');
-    }
   }
 
    /**
@@ -374,11 +370,6 @@
       showHeaderSortInfo(this, sortDesc);
       sourceObj.settings.sort = {};
       sourceObj.settings.sort[fieldName] = sortDesc ? 'desc' : 'asc';
-      /*
-
-      } else if (indiciaData.fieldConvertorSortFields[fieldName]) {
-        handleSortForSpecialField(sourceObj, fieldName, sortDesc);
-      }*/
       sourceObj.populate();
     });
 
@@ -541,6 +532,8 @@
   /**
    * Takes a string and applies token replacement for field values.
    *
+   * @param object el
+   *   The dataGrid element.
    * @param object doc
    *   The ES document for the row.
    * @param string text
@@ -549,7 +542,7 @@
    * @return string
    *   Updated text.
    */
-  function applyFieldReplacements(doc, text) {
+  function applyFieldReplacements(el, doc, text) {
     // Find any field name replacements.
     var fieldMatches = text.match(/\[(.*?)\]/g);
     var updatedText = text;
@@ -560,7 +553,17 @@
       // Field names can be separated by OR if we want to pick the first.
       var fieldOrList = field.split(' OR ');
       $.each(fieldOrList, function eachFieldName() {
-        dataVal = indiciaFns.getValueForField(doc, this);
+        var fieldDef = {};
+        var srcSettings = el.settings.sourceObject.settings;
+        if ($.inArray(this, el.settings.sourceObject.settings.fields) > -1) {
+          // Auto-locate aggregation fields in document.
+          if (srcSettings.mode === 'termAggregation') {
+            fieldDef.path = 'fieldlist.hits.hits.0._source';
+          } else if (srcSettings.mode === 'compositeAggregation') {
+            fieldDef.path = 'key';
+          }
+        }
+        dataVal = indiciaFns.getValueForField(doc, this, fieldDef);
         // Drop out when we find a value.
         return dataVal === '';
       });
@@ -572,6 +575,8 @@
   /**
    * Retrieve any action links to attach to an idcDataGrid row.
    *
+   * @param object el
+   *   The dataGrid element.
    * @param array actions
    *   List of actions from configuration.
    * @param object doc
@@ -580,7 +585,7 @@
    * @return string
    *   Action link HTML.
    */
-  function getActionsForRow(actions, doc) {
+  function getActionsForRow(el, actions, doc) {
     var html = '';
     $.each(actions, function eachActions() {
       var item;
@@ -605,7 +610,7 @@
             });
             link += params.join('&');
           }
-          item = applyFieldReplacements(doc, '<a href="' + link + '" title="' + this.title + '">' + item + '</a>');
+          item = applyFieldReplacements(el, doc, '<a href="' + link + '" title="' + this.title + '">' + item + '</a>');
         }
         html += item;
       }
@@ -660,9 +665,12 @@
     var total;
     if (sourceSettings.mode === 'docs') {
       total = response.hits.total.value;
-    } else if (response.aggregations.count) {
+      if (response.hits.total.relation && response.hits.total.relation === 'gte') {
+        ofLabel = 'at least ';
+      }
+    } else if (response.aggregations._count) {
       // Aggregation modes use a separate agg to count only when the filter changes.
-      total = response.aggregations.count.value;
+      total = response.aggregations._count.value;
       lastCount = total;
     } else if (lastCount) {
       total = lastCount;
@@ -841,6 +849,23 @@
     return longestWord;
   }
 
+  function buildColDef(field, agg) {
+    var colDef = {
+      field: field,
+      caption: field.asReadableKeyName()
+    };
+    var aggField;
+    if (indiciaData.esMappings[field] && indiciaData.esMappings[field].type === 'date') {
+      colDef.handler = 'date';
+    } else if (agg) {
+      aggField = indiciaFns.findValue(agg, 'field');
+      if (aggField && indiciaData.esMappings[aggField] && indiciaData.esMappings[aggField].type === 'date') {
+        colDef.handler = 'date';
+      }
+    }
+    return colDef;
+  }
+
   /**
    * Column setup.
    *
@@ -853,23 +878,14 @@
       el.settings.columns = [];
       // In aggregation mode, defaults are the field list + aggs list.
       if (srcSettings.mode.match(/Aggregation$/)) {
-        el.settings.columns.push({
-          field: srcSettings.uniqueField,
-          caption: srcSettings.uniqueField.asReadableKeyName()
-        });
+        el.settings.columns.push(buildColDef(srcSettings.uniqueField));
         $.each(srcSettings.fields, function eachField() {
           if (this !== srcSettings.uniqueField) {
-            el.settings.columns.push({
-              field: this,
-              caption: this.asReadableKeyName()
-            });
+            el.settings.columns.push(buildColDef(this));
           }
         });
         $.each(srcSettings.aggregation, function eachAgg(key) {
-          el.settings.columns.push({
-            field: key,
-            caption: key.asReadableKeyName()
-          });
+          el.settings.columns.push(buildColDef(key, this));
         });
       } else {
         // Docs mode.
@@ -892,19 +908,17 @@
     el.settings.availableColumnNames = [];
     // Specified columns must appear first.
     $.each(el.settings.columns, function eachCol() {
-      el.settings.availableColumnInfo[this.field] = {
-        field: this.field,
-        caption: this.caption
-      };
+      el.settings.availableColumnInfo[this.field] = this;
       el.settings.availableColumnNames.push(this.field);
     });
     // Add other mappings if in docs mode, unless overridden by availableColumns
     // setting.
     if (srcSettings.mode === 'docs') {
       $.each(indiciaData.gridMappingFields, function eachMapping(key, obj) {
-        if ($.inArray(key, el.settings.availableColumnInfo) === -1 &&
-            (!el.settings.availableColumns || $.inArray(key, el.settings.availableColumns) > -1)) {
-          el.settings.availableColumnInfo[key] = $.extend({}, obj, { field: key });
+        var exist = el.settings.availableColumnInfo[key] || {};
+        // Include unless not in configured list of available cols.
+        if (!el.settings.availableColumns || $.inArray(key, el.settings.availableColumns) > -1) {
+          el.settings.availableColumnInfo[key] = $.extend({}, obj, exist, { field: key });
           el.settings.availableColumnNames.push(key);
         }
       });
@@ -922,7 +936,7 @@
     if (!el.settings.rowsPerPageOptions) {
       el.settings.rowsPerPageOptions = [];
       if (buildPageSizeOptionsFrom >= 40) {
-        el.settings.rowsPerPageOptions.push(buildPageSizeOptionsFrom % 2);
+        el.settings.rowsPerPageOptions.push(Math.round(buildPageSizeOptionsFrom / 2));
       }
       el.settings.rowsPerPageOptions.push(buildPageSizeOptionsFrom);
       el.settings.rowsPerPageOptions.push(buildPageSizeOptionsFrom * 2);
@@ -960,7 +974,7 @@
       var footableSort;
       var tableClasses = ['table', 'es-data-grid'];
       var savedCols;
-      var tools;
+      var tools = [];
 
       indiciaFns.registerOutputPluginClass('idcDataGrid');
       el.settings = $.extend(true, {}, defaults);
@@ -1016,15 +1030,18 @@
           '</td></tr></tfoot>').appendTo(table);
       }
       setTableHeight(el);
-      // Add icons for table settings.
-      tools = '<span class="fas fa-wrench data-grid-show-settings" title="Click to show grid column settings"></span>';
-      if (document.fullscreenEnabled || document.mozFullScreenEnabled || document.webkitFullscreenEnabled) {
-        tools += '<br/><span class="far fa-window-maximize data-grid-fullscreen" title="Click to view grid in full screen mode"></span>';
-      }
+      // Add tool icons for table settings, full screen and multiselect mode.
       if (el.settings.includeMultiSelectTool) {
-        tools = '<span title="Enable multiple selection mode" class="fas fa-list multiselect-switch"></span><br/>' + tools;
+        tools.push('<span title="Enable multiple selection mode" class="fas fa-list multiselect-switch"></span><br/>');
       }
-      $('<div class="data-grid-tools">' + tools + '</div>').appendTo(el);
+      if (el.settings.includeColumnSettingsTool) {
+        tools.push('<span class="fas fa-wrench data-grid-show-settings" title="Click to show grid column settings"></span>');
+      }
+      if (el.settings.includeFullScreenTool &&
+          (document.fullscreenEnabled || document.mozFullScreenEnabled || document.webkitFullscreenEnabled)) {
+        tools.push('<span class="far fa-window-maximize data-grid-fullscreen" title="Click to view grid in full screen mode"></span>');
+      }
+      $('<div class="data-grid-tools">' + tools.join('<br/>') + '</div>').appendTo(el);
       // Add overlay for settings etc.
       $('<div class="data-grid-settings" style="display: none"></div>').appendTo(el);
       $('<div class="loading-spinner" style="display: none"><div>Loading...</div></div>').appendTo(el);
@@ -1101,7 +1118,7 @@
         cells = getRowBehaviourCells(el);
         cells = cells.concat(getDataCells(el, doc, maxCharsPerCol));
         if (el.settings.actions.length) {
-          cells.push('<td class="col-actions">' + getActionsForRow(el.settings.actions, doc) + '</td>');
+          cells.push('<td class="col-actions">' + getActionsForRow(el, el.settings.actions, doc) + '</td>');
         }
         if (el.settings.selectIdsOnNextLoad && $.inArray(hit._id, el.settings.selectIdsOnNextLoad) !== -1) {
           classes.push('selected');
@@ -1113,7 +1130,7 @@
         }
         if (el.settings.rowClasses) {
           $.each(el.settings.rowClasses, function eachClass() {
-            classes.push(applyFieldReplacements(doc, this));
+            classes.push(applyFieldReplacements(el, doc, this));
           });
         }
         dataRowIdAttr = hit._id ? ' data-row-id="' + hit._id + '"' : '';

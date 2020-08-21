@@ -363,11 +363,12 @@
     /**
      * Sort column headers click handler.
      */
-    indiciaFns.on('click', '#' + el.id + ' .sort', {}, function clickSort() {
-      var fieldName = $(this).closest('th').attr('data-field');
-      var sortDesc = $(this).hasClass('fa-sort-up');
+    indiciaFns.on('click', '#' + el.id + ' th', {}, function clickSort() {
+      var $sortSpan = $(this).find('span.sort');
+      var fieldName = $sortSpan.closest('th').attr('data-field');
+      var sortDesc = $sortSpan.hasClass('fa-sort-up');
       var sourceObj = el.settings.sourceObject;
-      showHeaderSortInfo(this, sortDesc);
+      showHeaderSortInfo($sortSpan, sortDesc);
       sourceObj.settings.sort = {};
       sourceObj.settings.sort[fieldName] = sortDesc ? 'desc' : 'asc';
       sourceObj.populate();
@@ -553,17 +554,20 @@
       // Field names can be separated by OR if we want to pick the first.
       var fieldOrList = field.split(' OR ');
       $.each(fieldOrList, function eachFieldName() {
+        var fieldName = this;
         var fieldDef = {};
         var srcSettings = el.settings.sourceObject.settings;
-        if ($.inArray(this, el.settings.sourceObject.settings.fields) > -1) {
+        if ($.inArray(fieldName, el.settings.sourceObject.settings.fields) > -1) {
           // Auto-locate aggregation fields in document.
           if (srcSettings.mode === 'termAggregation') {
             fieldDef.path = 'fieldlist.hits.hits.0._source';
           } else if (srcSettings.mode === 'compositeAggregation') {
             fieldDef.path = 'key';
+            // Aggregate keys use hyphens to represent path in doc.
+            fieldName = fieldName.replace(/\./g, '-');
           }
         }
-        dataVal = indiciaFns.getValueForField(doc, this, fieldDef);
+        dataVal = indiciaFns.getValueForField(doc, fieldName, fieldDef);
         // Drop out when we find a value.
         return dataVal === '';
       });
@@ -807,30 +811,42 @@
   function setColWidths(el, maxCharsPerCol) {
     var maxCharsPerRow = 0;
     var tbody = $(el).find('tbody');
+    var pixelsAvailable = tbody[0].clientWidth;
+    var scrollbarWidth = tbody[0].offsetWidth - tbody[0].clientWidth;
+    var scrollBarInnerWidth;
+    var outerSpacing = $(el).find('.col-0').outerWidth() - $(el).find('.col-0').width();
+    var totalPix = 0;
     // Column resizing needs to be done manually when tbody has scroll bar.
     if (el.settings.scrollY) {
+      if (el.settings.responsive) {
+        // Allow 14px space for responsive show + button.
+        $(el).find('.footable-toggle-col').css('width', '14px');
+        pixelsAvailable -= $(el).find('.footable-toggle-col').outerWidth();
+      }
+      if (el.settings.actions.length > 0) {
+        // Allow 22px space for actions column.
+        $(el).find('.col-actions').css('width', '22px');
+        pixelsAvailable -= $(el).find('.col-actions').outerWidth();
+      } else {
+        $(el).find('.col-actions').css('width', 0);
+      }
+      // Space header if a scroll bar visible.
+      if (tbody.find('tr').length > 0 && scrollbarWidth > 0) {
+        scrollBarInnerWidth = scrollbarWidth - outerSpacing;
+        $(el).find('.scroll-spacer').css('width', scrollBarInnerWidth + 'px');
+        pixelsAvailable -= $(el).find('.scroll-spacer').outerWidth();
+      } else {
+        $(el).find('.scroll-spacer').css('width', 0);
+      }
       $.each(el.settings.columns, function eachColumn(idx) {
         // Allow extra char per col for padding.
         maxCharsPerCol['col-' + idx] += 1;
         maxCharsPerRow += maxCharsPerCol['col-' + idx];
       });
-      if (el.settings.actions.length > 0) {
-        // Allow 3 characters per icon. Max 2 wide, rest can flow below.
-        maxCharsPerCol['col-actions'] = Math.min(6, el.settings.actions.length * 3);
-        maxCharsPerRow += maxCharsPerCol['col-actions'];
-      }
-      if (el.settings.responsive) {
-        maxCharsPerRow += 3;
-        $(el).find('.footable-toggle-col').css('width', (100 * (3 / maxCharsPerRow)) + '%');
-      }
-      $(el).find('.col-actions').css('width', (100 * (maxCharsPerCol['col-actions'] / maxCharsPerRow)) + '%');
       $.each(el.settings.columns, function eachColumn(idx) {
-        $(el).find('.col-' + idx).css('width', (100 * (maxCharsPerCol['col-' + idx] / maxCharsPerRow)) + '%');
+        $(el).find('.col-' + idx).css('width', (pixelsAvailable * (maxCharsPerCol['col-' + idx] / maxCharsPerRow) - outerSpacing) + 'px');
+        totalPix += (pixelsAvailable * (maxCharsPerCol['col-' + idx] / maxCharsPerRow));
       });
-      // Space header if a scroll bar visible.
-      if (tbody.find('tr').length > 0) {
-        $(el).find('.scroll-spacer').css('width', (tbody[0].offsetWidth - tbody[0].clientWidth) + 'px');
-      }
     }
   }
 
@@ -1100,10 +1116,7 @@
           maxCharsPerCol['col-' + idx] += 2;
         }
       });
-      if (el.settings.actions.length) {
-        // Allow 2 chars per action icon.
-        maxCharsPerCol['col-actions'] = Math.max(el.settings.actions.length * 2);
-      } else if (!el.settings.scrollY) {
+      if (el.settings.actions.length === 0 && !el.settings.scrollY) {
         // If no scrollbar or actions column, 2 extra chars for the last
         // heading as it contains tool icons.
         maxCharsPerCol['col-' + (el.settings.columns.length - 1)] += 2;
